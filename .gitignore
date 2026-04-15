@@ -1,0 +1,20 @@
+/target/
+/.idea/
+/.vscode/
+/.settings/
+/.classpath
+/.project
+/var/
+
+
+# Project exclude paths
+/loganalyser-app/target/
+/loganalyser-caseroot-export/target/
+/loganalyser-core/target/
+/loganalyser-domain/target/
+/loganalyser-export-parquet/target/
+/loganalyser-parser-java/target/
+/loganalyser-parser-polyglot/target/
+/loganalyser-persistence-jdbc/target/
+/loganalyser-spi/target/
+/loganalyser-storage-filesystem/target/

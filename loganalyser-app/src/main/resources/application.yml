@@ -1,0 +1,34 @@
+spring:
+  application:
+    name: caseroot-loganalyser
+  servlet:
+    multipart:
+      max-file-size: 1GB
+      max-request-size: 1GB
+
+server:
+  port: 8080
+  tomcat:
+    max-swallow-size: 1GB
+    max-http-form-post-size: 1GB
+
+loganalyser:
+  storage:
+    base-path: var/loganalyser
+  retention:
+    raw-log-days: 15
+    parsed-artifact-days: 30
+    caseroot-bundle-days: 30
+    metadata-days: 90
+  execution:
+    worker-threads: 2
+  output:
+    parquet-enabled: false
+  summary-store:
+    enabled: false
+    jdbc-url:
+    username:
+    password:
+    driver-class-name: org.postgresql.Driver
+    table-prefix: loganalyser_
+    initialize-schema: true

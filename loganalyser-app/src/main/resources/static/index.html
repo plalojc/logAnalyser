@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CaseRoot LogAnalyser</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<main class="shell">
+    <section class="hero">
+        <div>
+            <p class="eyebrow">Phase 4 Dashboard</p>
+            <h1>CaseRoot LogAnalyser</h1>
+            <p class="lede">Upload logs, submit file or directory paths, inspect parsed artifacts, and prepare clean evidence for CaseRoot without leaving the service.</p>
+        </div>
+        <button id="refreshButton" class="accent-button">Refresh</button>
+    </section>
+
+    <section class="metrics-grid" id="metricsGrid"></section>
+
+    <section class="panel">
+        <div class="panel-header">
+            <div>
+                <p class="eyebrow">Ingestion</p>
+                <h2>Analyze A Log</h2>
+            </div>
+            <span class="hint">Default flow: upload a file, add app name, click analyze. Log format is detected automatically.</span>
+        </div>
+        <div class="mode-switch" role="tablist" aria-label="Job submission mode">
+            <button id="uploadModeButton" class="mode-button active" type="button">Upload File</button>
+            <button id="pathModeButton" class="mode-button" type="button">Server Path</button>
+        </div>
+        <div id="uploadModePanel" class="mode-panel active">
+            <form id="uploadJobForm" class="query-form">
+                <label class="wide-field">
+                    Log File
+                    <input id="uploadFile" name="file" type="file" accept=".log,.txt,.out,.json,.gz,.zip">
+                </label>
+                <label>
+                    Application
+                    <input id="uploadApplication" name="application" type="text" placeholder="db-service">
+                </label>
+                <label>
+                    Environment
+                    <input id="uploadEnvironment" name="environment" type="text" placeholder="prod">
+                </label>
+                <button class="accent-button" type="submit">Analyze Uploaded File</button>
+            </form>
+        </div>
+        <div id="pathModePanel" class="mode-panel">
+            <form id="pathJobForm" class="query-form">
+                <label>
+                    Source Type
+                    <select id="sourceType" name="sourceType">
+                        <option value="FILE_PATH">FILE_PATH</option>
+                        <option value="DIRECTORY">DIRECTORY</option>
+                    </select>
+                </label>
+                <label>
+                    Source Location
+                    <input id="sourceLocation" name="sourceLocation" type="text" placeholder="C:\logs\server.log or C:\logs\batch">
+                </label>
+                <label>
+                    Original File Name
+                    <input id="originalFileName" name="originalFileName" type="text" placeholder="Optional for FILE_PATH">
+                </label>
+                <label>
+                    Application
+                    <input id="pathApplication" name="application" type="text" placeholder="order-service">
+                </label>
+                <label>
+                    Environment
+                    <input id="pathEnvironment" name="environment" type="text" placeholder="prod">
+                </label>
+                <button class="accent-button" type="submit">Submit Path Job</button>
+            </form>
+        </div>
+        <div id="jobSubmissionResult" class="result-block empty">No job submitted yet.</div>
+    </section>
+
+    <section class="panel">
+        <div class="panel-header">
+            <div>
+                <p class="eyebrow">Overview</p>
+                <h2>Recent Jobs</h2>
+            </div>
+            <span class="hint">Select two or more jobs for comparison.</span>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>Compare</th>
+                    <th>Job</th>
+                    <th>View</th>
+                    <th>Application</th>
+                    <th>Runtime</th>
+                    <th>Status</th>
+                    <th>Events</th>
+                </tr>
+                </thead>
+                <tbody id="jobsTableBody"></tbody>
+            </table>
+        </div>
+        <div class="actions">
+            <button id="compareButton" class="accent-button">Compare Selected Jobs</button>
+        </div>
+        <div id="comparisonResult" class="result-block"></div>
+    </section>
+
+    <section class="panel">
+        <div class="panel-header">
+            <div>
+                <p class="eyebrow">Job Detail</p>
+                <h2>Selected Job</h2>
+            </div>
+            <span class="hint">Open a job to inspect summary, CaseRoot bundle, and artifact downloads.</span>
+        </div>
+        <div id="jobDetail" class="result-block empty">Select a job from the table or submit a new one.</div>
+    </section>
+
+    <section class="panel">
+        <div class="panel-header">
+            <div>
+                <p class="eyebrow">Event Search</p>
+                <h2>Query Parsed Artifacts</h2>
+            </div>
+        </div>
+        <form id="eventQueryForm" class="query-form">
+            <label>
+                Job ID
+                <input id="queryJobId" name="jobId" type="text" placeholder="Paste a completed job id">
+            </label>
+            <label>
+                Level
+                <input id="queryLevel" name="level" type="text" placeholder="ERROR">
+            </label>
+            <label>
+                Source File
+                <input id="querySourceFile" name="sourceFile" type="text" placeholder="server.log">
+            </label>
+            <label>
+                Contains
+                <input id="queryContains" name="contains" type="text" placeholder="Failed order">
+            </label>
+            <label>
+                Limit
+                <input id="queryLimit" name="limit" type="number" min="1" max="1000" value="25">
+            </label>
+            <button class="accent-button" type="submit">Run Query</button>
+        </form>
+        <pre id="eventQueryResult" class="code-block"></pre>
+    </section>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>
