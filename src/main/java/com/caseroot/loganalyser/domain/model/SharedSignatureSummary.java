@@ -2,7 +2,8 @@ package com.caseroot.loganalyser.domain.model;
 
 public record SharedSignatureSummary(
         String signatureHash,
-        String normalizedMessage,
+        String packageName,
+        String representativeMessage,
         int jobCount,
         long totalCount
 ) {

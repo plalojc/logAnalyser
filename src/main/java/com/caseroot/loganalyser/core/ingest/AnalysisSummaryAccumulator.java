@@ -1,14 +1,19 @@
 package com.caseroot.loganalyser.core.ingest;
 
+import com.caseroot.loganalyser.domain.model.AnalysisFocus;
+import com.caseroot.loganalyser.domain.model.AnalysisOptions;
 import com.caseroot.loganalyser.domain.model.AnalysisSummary;
 import com.caseroot.loganalyser.domain.model.AnalysisSummaryCounts;
+import com.caseroot.loganalyser.domain.model.EventSnippet;
 import com.caseroot.loganalyser.domain.model.ExceptionSummary;
+import com.caseroot.loganalyser.domain.model.GapHighlight;
 import com.caseroot.loganalyser.domain.model.GapStatistics;
 import com.caseroot.loganalyser.domain.model.LogEvent;
 import com.caseroot.loganalyser.domain.model.ParseStatus;
 import com.caseroot.loganalyser.domain.model.ReconstructedLogEvent;
 import com.caseroot.loganalyser.domain.model.RuntimeDescriptor;
 import com.caseroot.loganalyser.domain.model.SignatureSummary;
+import com.caseroot.loganalyser.domain.model.StackFrame;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -18,12 +23,19 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 final class AnalysisSummaryAccumulator {
 
+    private static final int SAMPLE_MESSAGE_LIMIT = 3;
+    private static final int SAMPLE_EVENT_LIMIT = 3;
+    private static final int GAP_HIGHLIGHT_LIMIT = 3;
+    private static final int HIGHLIGHT_LIMIT = 5;
+    private static final int MAX_STATEMENT_LENGTH = 240;
     private static final Pattern UUID_PATTERN = Pattern.compile("\\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\\b");
     private static final Pattern DURATION_PATTERN = Pattern.compile("\\b\\d+\\s*ms\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern IP_PATTERN = Pattern.compile("\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b");
@@ -38,6 +50,7 @@ final class AnalysisSummaryAccumulator {
 
     private long totalInputLines;
     private long totalEvents;
+    private long focusedEvents;
     private long parsedEvents;
     private long partialEvents;
     private long unclassifiedEvents;
@@ -49,8 +62,25 @@ final class AnalysisSummaryAccumulator {
     private Long minGapMs;
     private Long maxGapMs;
     private Instant previousTimestamp;
+    private EventSnippet previousFocusedEventSnippet;
+    private final long largeGapHighlightThresholdMs;
+    private final AnalysisOptions analysisOptions;
+    private final Set<AnalysisFocus> focusSelections;
 
     AnalysisSummaryAccumulator() {
+        this(60_000L, new AnalysisOptions(null, List.of(AnalysisFocus.ALL)));
+    }
+
+    AnalysisSummaryAccumulator(long largeGapHighlightThresholdMs) {
+        this(largeGapHighlightThresholdMs, new AnalysisOptions(null, List.of(AnalysisFocus.ALL)));
+    }
+
+    AnalysisSummaryAccumulator(long largeGapHighlightThresholdMs, AnalysisOptions analysisOptions) {
+        this.largeGapHighlightThresholdMs = largeGapHighlightThresholdMs;
+        this.analysisOptions = analysisOptions == null
+                ? new AnalysisOptions(null, List.of(AnalysisFocus.ALL))
+                : analysisOptions;
+        this.focusSelections = new LinkedHashSet<>(this.analysisOptions.focusSelections());
         gapBuckets.put("0-100ms", 0L);
         gapBuckets.put("100ms-1s", 0L);
         gapBuckets.put("1s-10s", 0L);
@@ -60,7 +90,8 @@ final class AnalysisSummaryAccumulator {
 
     LogEvent enrichAndRecord(ReconstructedLogEvent reconstructedLogEvent, LogEvent logEvent) {
         LogEvent normalizedEvent = normalize(logEvent);
-        Long gap = calculateGap(normalizedEvent.timestamp());
+        boolean focused = matchesFocus(normalizedEvent);
+        Long gap = focused ? calculateGap(normalizedEvent.timestamp()) : null;
 
         LogEvent enrichedEvent = new LogEvent(
                 normalizedEvent.eventId(),
@@ -94,10 +125,6 @@ final class AnalysisSummaryAccumulator {
             multilineEvents++;
         }
 
-        if (enrichedEvent.level() != null && !enrichedEvent.level().isBlank()) {
-            levelCounts.merge(enrichedEvent.level(), 1L, Long::sum);
-        }
-
         if (enrichedEvent.parseStatus() == ParseStatus.PARSED) {
             parsedEvents++;
         } else if (enrichedEvent.parseStatus() == ParseStatus.PARTIAL) {
@@ -106,13 +133,29 @@ final class AnalysisSummaryAccumulator {
             unclassifiedEvents++;
         }
 
-        String exceptionKey = buildExceptionKey(enrichedEvent.exceptionClass(), enrichedEvent.rootCauseClass());
-        if (exceptionKey != null) {
-            exceptionCounts.merge(exceptionKey, 1L, Long::sum);
-        }
+        if (focused) {
+            focusedEvents++;
+            GapHighlight gapHighlight = null;
+            EventSnippet currentSnippet = toEventSnippet(enrichedEvent);
+            if (gap != null && Math.abs(gap) > largeGapHighlightThresholdMs && previousFocusedEventSnippet != null) {
+                gapHighlight = new GapHighlight(gap, 1L, previousFocusedEventSnippet, currentSnippet);
+            }
 
-        signatures.computeIfAbsent(enrichedEvent.signatureHash(), ignored -> SignatureAggregate.from(enrichedEvent))
-                .record(enrichedEvent);
+            if (enrichedEvent.level() != null && !enrichedEvent.level().isBlank()) {
+                levelCounts.merge(enrichedEvent.level(), 1L, Long::sum);
+            }
+
+            String exceptionKey = buildExceptionKey(enrichedEvent.exceptionClass(), enrichedEvent.rootCauseClass());
+            if (exceptionKey != null) {
+                exceptionCounts.merge(exceptionKey, 1L, Long::sum);
+            }
+
+            signatures.computeIfAbsent(
+                            enrichedEvent.signatureHash(),
+                            ignored -> SignatureAggregate.from(enrichedEvent, largeGapHighlightThresholdMs))
+                    .record(enrichedEvent, currentSnippet, gapHighlight);
+            previousFocusedEventSnippet = currentSnippet;
+        }
 
         return enrichedEvent;
     }
@@ -128,6 +171,7 @@ final class AnalysisSummaryAccumulator {
                 new AnalysisSummaryCounts(
                         totalInputLines,
                         totalEvents,
+                        focusedEvents,
                         parsedEvents,
                         partialEvents,
                         unclassifiedEvents,
@@ -145,7 +189,9 @@ final class AnalysisSummaryAccumulator {
                         gapBuckets
                 ),
                 signatures.values().stream()
-                        .sorted(Comparator.comparingLong(SignatureAggregate::count).reversed())
+                        .sorted(Comparator.comparingLong(SignatureAggregate::count).reversed()
+                                .thenComparingLong(SignatureAggregate::exceptionCount).reversed()
+                                .thenComparing(SignatureAggregate::packageName))
                         .map(SignatureAggregate::toSummary)
                         .limit(25)
                         .toList(),
@@ -159,19 +205,23 @@ final class AnalysisSummaryAccumulator {
                         })
                         .limit(25)
                         .toList(),
-                warnings
+                buildWarnings()
         );
+    }
+
+    private List<String> buildWarnings() {
+        List<String> allWarnings = new ArrayList<>(warnings);
+        if (!focusSelections.contains(AnalysisFocus.ALL)) {
+            allWarnings.add("Focused analysis applied: " + focusSelections + ". Non-matching events were preserved in parsed artifacts but excluded from summary grouping.");
+        }
+        return allWarnings;
     }
 
     private LogEvent normalize(LogEvent logEvent) {
         String source = firstNonBlank(logEvent.message(), logEvent.rawEvent());
         String normalizedMessage = normalizeMessage(source);
-        String signatureHash = hash("%s|%s|%s|%s".formatted(
-                blankToEmpty(logEvent.level()),
-                blankToEmpty(logEvent.logger()),
-                blankToEmpty(logEvent.exceptionClass()),
-                normalizedMessage
-        ));
+        String packageName = extractPackageName(logEvent);
+        String signatureHash = hash(packageName);
 
         return new LogEvent(
                 logEvent.eventId(),
@@ -262,22 +312,134 @@ final class AnalysisSummaryAccumulator {
         return normalized;
     }
 
-    private String buildExceptionKey(String exceptionClass, String rootCauseClass) {
+    private static String buildExceptionKey(String exceptionClass, String rootCauseClass) {
         if ((exceptionClass == null || exceptionClass.isBlank()) && (rootCauseClass == null || rootCauseClass.isBlank())) {
             return null;
         }
         return blankToEmpty(exceptionClass) + "|" + blankToEmpty(rootCauseClass);
     }
 
-    private String firstNonBlank(String first, String second) {
+    private static String firstNonBlank(String first, String second) {
         if (first != null && !first.isBlank()) {
             return first;
         }
         return second == null ? "" : second;
     }
 
-    private String blankToEmpty(String value) {
+    private static String extractPackageName(LogEvent event) {
+        String logger = firstNonBlank(event.logger(), null);
+        if (!logger.isBlank()) {
+            return toPackageName(logger);
+        }
+        if (!event.stackFrames().isEmpty()) {
+            StackFrame firstFrame = event.stackFrames().getFirst();
+            if (firstFrame.className() != null && !firstFrame.className().isBlank()) {
+                return toPackageName(firstFrame.className());
+            }
+        }
+        return "unscoped";
+    }
+
+    private static String toPackageName(String value) {
+        String candidate = value.trim();
+        int innerClassSeparator = candidate.indexOf('$');
+        if (innerClassSeparator >= 0) {
+            candidate = candidate.substring(0, innerClassSeparator);
+        }
+        int lastDot = candidate.lastIndexOf('.');
+        if (lastDot < 0) {
+            return candidate;
+        }
+
+        String lastSegment = candidate.substring(lastDot + 1);
+        if (!lastSegment.isEmpty() && Character.isUpperCase(lastSegment.charAt(0))) {
+            return candidate.substring(0, lastDot);
+        }
+        return candidate;
+    }
+
+    private static String blankToEmpty(String value) {
         return value == null ? "" : value;
+    }
+
+    private boolean matchesFocus(LogEvent event) {
+        if (analysisOptions.includes(AnalysisFocus.ALL)) {
+            return true;
+        }
+
+        if (analysisOptions.includes(AnalysisFocus.EXCEPTION)
+                && ((event.exceptionClass() != null && !event.exceptionClass().isBlank())
+                || (event.rootCauseClass() != null && !event.rootCauseClass().isBlank()))) {
+            return true;
+        }
+
+        String level = blankToEmpty(event.level()).toUpperCase();
+        if ((analysisOptions.includes(AnalysisFocus.ERROR) && ("ERROR".equals(level) || "FATAL".equals(level)))
+                || (analysisOptions.includes(AnalysisFocus.WARN) && "WARN".equals(level))
+                || (analysisOptions.includes(AnalysisFocus.INFO) && "INFO".equals(level))
+                || (analysisOptions.includes(AnalysisFocus.DEBUG) && "DEBUG".equals(level))
+                || (analysisOptions.includes(AnalysisFocus.TRACE) && "TRACE".equals(level))) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private EventSnippet toEventSnippet(LogEvent event) {
+        return new EventSnippet(
+                event.sourceFile(),
+                event.timestamp(),
+                event.level(),
+                event.logger(),
+                event.message(),
+                summarizeStatement(event),
+                event.exceptionClass(),
+                event.rootCauseClass(),
+                summarizeStack(event)
+        );
+    }
+
+    private String summarizeStatement(LogEvent event) {
+        String rawEvent = event.rawEvent();
+        String statement = rawEvent == null || rawEvent.isBlank()
+                ? "%s %s - %s".formatted(
+                blankToEmpty(event.level()),
+                blankToEmpty(event.logger()),
+                firstNonBlank(event.message(), "<no-message>"))
+                : rawEvent.lines().findFirst().orElse(rawEvent);
+        return abbreviate(statement);
+    }
+
+    private String summarizeStack(LogEvent event) {
+        String primaryException = firstNonBlank(event.exceptionClass(), event.rootCauseClass());
+        if (primaryException.isBlank()) {
+            return null;
+        }
+        if (event.stackFrames().isEmpty()) {
+            return primaryException;
+        }
+
+        StackFrame topFrame = event.stackFrames().getFirst();
+        String location = firstNonBlank(topFrame.className(), "<unknown>");
+        if (topFrame.methodName() != null && !topFrame.methodName().isBlank()) {
+            location += "." + topFrame.methodName();
+        }
+        if (topFrame.fileName() != null && !topFrame.fileName().isBlank()) {
+            location += "(" + topFrame.fileName();
+            if (topFrame.lineNumber() != null) {
+                location += ":" + topFrame.lineNumber();
+            }
+            location += ")";
+        }
+
+        return primaryException + " at " + location + " [" + event.stackFrames().size() + " frames]";
+    }
+
+    private static String abbreviate(String value) {
+        if (value == null || value.length() <= MAX_STATEMENT_LENGTH) {
+            return value;
+        }
+        return value.substring(0, MAX_STATEMENT_LENGTH - 3) + "...";
     }
 
     private String hash(String value) {
@@ -296,58 +458,84 @@ final class AnalysisSummaryAccumulator {
 
     private static final class SignatureAggregate {
         private final String signatureHash;
-        private final String normalizedMessage;
-        private final String level;
-        private final String logger;
-        private final String exceptionClass;
-        private final String rootCauseClass;
+        private final String packageName;
+        private String representativeLogger;
         private String firstSeenTimestamp;
         private String lastSeenTimestamp;
+        private final Map<String, Long> levelCounts = new LinkedHashMap<>();
+        private final Map<String, Long> messageCounts = new LinkedHashMap<>();
+        private final Map<String, Long> highlightCounts = new LinkedHashMap<>();
+        private final Map<String, EventSnippet> sampleEventsByMessage = new LinkedHashMap<>();
+        private final Map<String, GapHighlightAggregate> gapHighlightAggregates = new LinkedHashMap<>();
+        private final long largeGapHighlightThresholdMs;
         private long count;
+        private long exceptionCount;
+        private long largeGapCount;
 
         private SignatureAggregate(
                 String signatureHash,
-                String normalizedMessage,
-                String level,
-                String logger,
-                String exceptionClass,
-                String rootCauseClass,
+                String packageName,
+                String representativeLogger,
                 String firstSeenTimestamp,
                 String lastSeenTimestamp,
-                long count
+                long largeGapHighlightThresholdMs
         ) {
             this.signatureHash = signatureHash;
-            this.normalizedMessage = normalizedMessage;
-            this.level = level;
-            this.logger = logger;
-            this.exceptionClass = exceptionClass;
-            this.rootCauseClass = rootCauseClass;
+            this.packageName = packageName;
+            this.representativeLogger = representativeLogger;
             this.firstSeenTimestamp = firstSeenTimestamp;
             this.lastSeenTimestamp = lastSeenTimestamp;
-            this.count = count;
+            this.largeGapHighlightThresholdMs = largeGapHighlightThresholdMs;
         }
 
-        static SignatureAggregate from(LogEvent event) {
+        static SignatureAggregate from(LogEvent event, long largeGapHighlightThresholdMs) {
             return new SignatureAggregate(
                     event.signatureHash(),
-                    event.normalizedMessage(),
-                    event.level(),
+                    extractPackageName(event),
                     event.logger(),
-                    event.exceptionClass(),
-                    event.rootCauseClass(),
                     event.timestamp(),
                     event.timestamp(),
-                    0
+                    largeGapHighlightThresholdMs
             );
         }
 
-        void record(LogEvent event) {
+        void record(LogEvent event, EventSnippet currentSnippet, GapHighlight gapHighlight) {
             count++;
+            if ((representativeLogger == null || representativeLogger.isBlank())
+                    && event.logger() != null && !event.logger().isBlank()) {
+                representativeLogger = event.logger();
+            }
             if (firstSeenTimestamp == null) {
                 firstSeenTimestamp = event.timestamp();
             }
             if (event.timestamp() != null) {
                 lastSeenTimestamp = event.timestamp();
+            }
+            if (event.level() != null && !event.level().isBlank()) {
+                levelCounts.merge(event.level(), 1L, Long::sum);
+            }
+            if (event.normalizedMessage() != null && !event.normalizedMessage().isBlank()) {
+                messageCounts.merge(event.normalizedMessage(), 1L, Long::sum);
+                sampleEventsByMessage.putIfAbsent(event.normalizedMessage(), currentSnippet);
+            }
+            if (event.exceptionClass() != null && !event.exceptionClass().isBlank()) {
+                exceptionCount++;
+                highlightCounts.merge(formatExceptionHighlight(event), 1L, Long::sum);
+            } else if (event.rootCauseClass() != null && !event.rootCauseClass().isBlank()) {
+                exceptionCount++;
+                highlightCounts.merge(formatExceptionHighlight(event), 1L, Long::sum);
+            }
+            if (event.level() != null && ("ERROR".equalsIgnoreCase(event.level()) || "FATAL".equalsIgnoreCase(event.level()))) {
+                highlightCounts.merge("Error-level event: " + fallbackMessage(event.normalizedMessage()), 1L, Long::sum);
+            }
+            if (event.gapFromPreviousMs() != null && Math.abs(event.gapFromPreviousMs()) > largeGapHighlightThresholdMs) {
+                largeGapCount++;
+                highlightCounts.merge(formatGapHighlight(event), 1L, Long::sum);
+                if (gapHighlight != null) {
+                    String key = gapKey(gapHighlight);
+                    gapHighlightAggregates.computeIfAbsent(key, ignored -> new GapHighlightAggregate(gapHighlight))
+                            .record(gapHighlight.gapMs());
+                }
             }
         }
 
@@ -355,18 +543,139 @@ final class AnalysisSummaryAccumulator {
             return count;
         }
 
+        long exceptionCount() {
+            return exceptionCount;
+        }
+
+        String packageName() {
+            return packageName;
+        }
+
         SignatureSummary toSummary() {
             return new SignatureSummary(
                     signatureHash,
-                    normalizedMessage,
-                    level,
-                    logger,
-                    exceptionClass,
-                    rootCauseClass,
+                    packageName,
+                    representativeLogger,
                     firstSeenTimestamp,
                     lastSeenTimestamp,
-                    count
+                    count,
+                    levelCounts,
+                    exceptionCount,
+                    largeGapCount,
+                    messageCounts.entrySet().stream()
+                            .sorted(Map.Entry.<String, Long>comparingByValue().reversed()
+                                    .thenComparing(Map.Entry::getKey))
+                            .limit(SAMPLE_MESSAGE_LIMIT)
+                            .map(Map.Entry::getKey)
+                            .toList(),
+                    messageCounts.entrySet().stream()
+                            .sorted(Map.Entry.<String, Long>comparingByValue().reversed()
+                                    .thenComparing(Map.Entry::getKey))
+                            .map(Map.Entry::getKey)
+                            .filter(sampleEventsByMessage::containsKey)
+                            .limit(SAMPLE_EVENT_LIMIT)
+                            .map(sampleEventsByMessage::get)
+                            .toList(),
+                    gapHighlightAggregates.values().stream()
+                            .sorted(Comparator.comparingLong(GapHighlightAggregate::occurrenceCount).reversed()
+                                    .thenComparingLong(GapHighlightAggregate::largestGapMs).reversed())
+                            .limit(GAP_HIGHLIGHT_LIMIT)
+                            .map(GapHighlightAggregate::toHighlight)
+                            .toList(),
+                    highlightCounts.entrySet().stream()
+                            .sorted(Map.Entry.<String, Long>comparingByValue().reversed()
+                                    .thenComparing(Map.Entry::getKey))
+                            .limit(HIGHLIGHT_LIMIT)
+                            .map(entry -> entry.getValue() > 1
+                                    ? entry.getKey() + " (" + entry.getValue() + ")"
+                                    : entry.getKey())
+                            .toList()
             );
+        }
+
+        private String formatExceptionHighlight(LogEvent event) {
+            String exceptionPart = firstNonBlank(event.exceptionClass(), event.rootCauseClass());
+            String rootCausePart = event.rootCauseClass();
+            if (rootCausePart != null && !rootCausePart.isBlank()
+                    && !rootCausePart.equals(exceptionPart)) {
+                return "Exception: " + exceptionPart + " -> " + rootCausePart;
+            }
+            return "Exception: " + exceptionPart;
+        }
+
+        private String formatGapHighlight(LogEvent event) {
+            return "Large gap before " + abbreviate(fallbackMessage(event.normalizedMessage()));
+        }
+
+        private String fallbackMessage(String value) {
+            return value == null || value.isBlank() ? "<no-message>" : value;
+        }
+
+        private String gapKey(GapHighlight gapHighlight) {
+            return normalizeGapEventSignature(gapHighlight.previousEvent()) + "|" + normalizeGapEventSignature(gapHighlight.currentEvent());
+        }
+
+        private String normalizeGapEventSignature(EventSnippet eventSnippet) {
+            return blankToEmpty(eventSnippet.level()) + "|"
+                    + blankToEmpty(eventSnippet.logger()) + "|"
+                    + normalizeGroupingText(eventSnippet.message()) + "|"
+                    + blankToEmpty(eventSnippet.exceptionClass()) + "|"
+                    + normalizeStackGrouping(eventSnippet.stackSummary());
+        }
+
+        private String normalizeGroupingText(String value) {
+            if (value == null || value.isBlank()) {
+                return "";
+            }
+            String normalized = UUID_PATTERN.matcher(value).replaceAll("<UUID>");
+            normalized = DURATION_PATTERN.matcher(normalized).replaceAll("<DURATION_MS>");
+            normalized = IP_PATTERN.matcher(normalized).replaceAll("<IP>");
+            normalized = HEX_PATTERN.matcher(normalized).replaceAll("<HEX>");
+            normalized = NUMBER_PATTERN.matcher(normalized).replaceAll("<NUM>");
+            return normalized;
+        }
+
+        private String normalizeStackGrouping(String value) {
+            if (value == null || value.isBlank()) {
+                return "";
+            }
+            String normalized = normalizeGroupingText(value);
+            normalized = normalized.replaceAll("\\(.*?\\)", "(...)");
+            normalized = normalized.replaceAll("\\s*\\[[^\\]]+\\]", "");
+            return normalized;
+        }
+
+        private static final class GapHighlightAggregate {
+            private final EventSnippet previousEvent;
+            private final EventSnippet currentEvent;
+            private long largestGapMs;
+            private long occurrenceCount;
+
+            private GapHighlightAggregate(GapHighlight initialGap) {
+                this.previousEvent = initialGap.previousEvent();
+                this.currentEvent = initialGap.currentEvent();
+                this.largestGapMs = initialGap.gapMs();
+                this.occurrenceCount = 0L;
+            }
+
+            void record(long gapMs) {
+                occurrenceCount++;
+                if (gapMs > largestGapMs) {
+                    largestGapMs = gapMs;
+                }
+            }
+
+            long largestGapMs() {
+                return largestGapMs;
+            }
+
+            long occurrenceCount() {
+                return occurrenceCount;
+            }
+
+            GapHighlight toHighlight() {
+                return new GapHighlight(largestGapMs, occurrenceCount, previousEvent, currentEvent);
+            }
         }
     }
 }

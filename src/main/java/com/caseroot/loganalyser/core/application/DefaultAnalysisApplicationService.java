@@ -5,6 +5,7 @@ import com.caseroot.loganalyser.core.ingest.LineSampler;
 import com.caseroot.loganalyser.core.query.ArtifactEventQueryService;
 import com.caseroot.loganalyser.domain.model.AnalysisJob;
 import com.caseroot.loganalyser.domain.model.AnalysisJobStatus;
+import com.caseroot.loganalyser.domain.model.AnalysisOptions;
 import com.caseroot.loganalyser.domain.model.AnalysisSummary;
 import com.caseroot.loganalyser.domain.model.ArtifactDescriptor;
 import com.caseroot.loganalyser.domain.model.DashboardOverview;
@@ -121,6 +122,7 @@ public final class DefaultAnalysisApplicationService implements AnalysisApplicat
                 command.originalFileName(),
                 command.application(),
                 command.environment(),
+                command.analysisOptions(),
                 requestedProfile.orElse(null),
                 null,
                 null,
@@ -148,6 +150,7 @@ public final class DefaultAnalysisApplicationService implements AnalysisApplicat
                     command.originalFileName(),
                     command.application(),
                     command.environment(),
+                    command.analysisOptions(),
                     requestedProfile.orElse(null),
                     parserPlugin.pluginId(),
                     parserPlugin.runtimeDescriptor(),
@@ -168,6 +171,7 @@ public final class DefaultAnalysisApplicationService implements AnalysisApplicat
                     jobId,
                     now,
                     retentionPolicy,
+                    command.analysisOptions(),
                     analysisInputs,
                     parsedArtifact,
                     parquetArtifact,
@@ -185,6 +189,7 @@ public final class DefaultAnalysisApplicationService implements AnalysisApplicat
                     now,
                     retentionPolicy,
                     artifacts,
+                    command.analysisOptions(),
                     null,
                     null,
                     exception
@@ -241,7 +246,8 @@ public final class DefaultAnalysisApplicationService implements AnalysisApplicat
             for (var signature : job.summary().topSignatures()) {
                 signatureAggregates.computeIfAbsent(signature.signatureHash(), ignored -> new SharedSignatureAggregate(
                         signature.signatureHash(),
-                        signature.normalizedMessage()
+                        signature.packageName(),
+                        signature.sampleMessages().isEmpty() ? null : signature.sampleMessages().getFirst()
                 )).record(job.jobId(), signature.count());
             }
             for (var exception : job.summary().topExceptions()) {
@@ -455,6 +461,7 @@ public final class DefaultAnalysisApplicationService implements AnalysisApplicat
             UUID jobId,
             Instant createdAt,
             RetentionPolicy retentionPolicy,
+            AnalysisOptions analysisOptions,
             List<Path> inputPaths,
             ArtifactDescriptor parsedArtifact,
             ArtifactDescriptor parquetArtifact,
@@ -468,6 +475,7 @@ public final class DefaultAnalysisApplicationService implements AnalysisApplicat
                     jobId,
                     inputPaths,
                     parserPlugin,
+                    analysisOptions,
                     parsedArtifact,
                     summaryArtifact
             );
@@ -493,6 +501,7 @@ public final class DefaultAnalysisApplicationService implements AnalysisApplicat
                     command.originalFileName(),
                     command.application(),
                     command.environment(),
+                    analysisOptions,
                     requestedProfile,
                     parserPlugin.pluginId(),
                     parserPlugin.runtimeDescriptor(),
@@ -518,6 +527,7 @@ public final class DefaultAnalysisApplicationService implements AnalysisApplicat
                     createdAt,
                     retentionPolicy,
                     artifacts,
+                    analysisOptions,
                     parserPlugin.pluginId(),
                     parserPlugin.runtimeDescriptor(),
                     exception
@@ -532,6 +542,7 @@ public final class DefaultAnalysisApplicationService implements AnalysisApplicat
             Instant createdAt,
             RetentionPolicy retentionPolicy,
             Map<String, ArtifactDescriptor> artifacts,
+            AnalysisOptions analysisOptions,
             String selectedParserPlugin,
             RuntimeDescriptor runtimeDescriptor,
             RuntimeException exception
@@ -543,6 +554,7 @@ public final class DefaultAnalysisApplicationService implements AnalysisApplicat
                 command.originalFileName(),
                 command.application(),
                 command.environment(),
+                analysisOptions,
                 requestedProfile,
                 selectedParserPlugin,
                 runtimeDescriptor,
@@ -595,13 +607,15 @@ public final class DefaultAnalysisApplicationService implements AnalysisApplicat
 
     private static final class SharedSignatureAggregate {
         private final String signatureHash;
-        private final String normalizedMessage;
+        private final String packageName;
+        private final String representativeMessage;
         private final Set<UUID> jobs = new HashSet<>();
         private long totalCount;
 
-        private SharedSignatureAggregate(String signatureHash, String normalizedMessage) {
+        private SharedSignatureAggregate(String signatureHash, String packageName, String representativeMessage) {
             this.signatureHash = signatureHash;
-            this.normalizedMessage = normalizedMessage;
+            this.packageName = packageName;
+            this.representativeMessage = representativeMessage;
         }
 
         void record(UUID jobId, long count) {
@@ -618,7 +632,7 @@ public final class DefaultAnalysisApplicationService implements AnalysisApplicat
         }
 
         SharedSignatureSummary toSummary() {
-            return new SharedSignatureSummary(signatureHash, normalizedMessage, jobs.size(), totalCount);
+            return new SharedSignatureSummary(signatureHash, packageName, representativeMessage, jobs.size(), totalCount);
         }
     }
 

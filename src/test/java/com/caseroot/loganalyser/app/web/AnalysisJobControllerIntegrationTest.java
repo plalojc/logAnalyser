@@ -2,6 +2,7 @@ package com.caseroot.loganalyser.app.web;
 
 import com.caseroot.loganalyser.core.application.AnalysisApplicationService;
 import com.caseroot.loganalyser.core.application.CreateAnalysisJobCommand;
+import com.caseroot.loganalyser.domain.model.AnalysisOptions;
 import com.caseroot.loganalyser.domain.model.AnalysisJobStatus;
 import com.caseroot.loganalyser.domain.model.SourceType;
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -51,7 +53,8 @@ class AnalysisJobControllerIntegrationTest {
                 inputFile.getFileName().toString(),
                 "order-service",
                 "prod",
-                "log4j_pattern"
+                "log4j_pattern",
+                new AnalysisOptions(null, List.of())
         ));
 
         assertTrue(submittedJob.status() == AnalysisJobStatus.ACCEPTED || submittedJob.status() == AnalysisJobStatus.RUNNING);
@@ -65,7 +68,8 @@ class AnalysisJobControllerIntegrationTest {
         assertEquals(1L, job.summary().counts().multilineEvents());
         assertEquals(1L, job.summary().gapStatistics().totalGaps());
         assertEquals(877L, job.summary().gapStatistics().maxGapMs());
-        assertEquals(2, job.summary().topSignatures().size());
+        assertEquals(1, job.summary().topSignatures().size());
+        assertEquals("com.acme", job.summary().topSignatures().getFirst().packageName());
         assertEquals(1, job.summary().topExceptions().size());
         assertTrue(Files.exists(Path.of(job.artifacts().get("summary").location())));
         assertTrue(Files.exists(Path.of(job.artifacts().get("parsed-events").location())));

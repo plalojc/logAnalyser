@@ -58,9 +58,9 @@ public final class JdbcAnalysisSummaryStore implements AnalysisSummaryStore {
         jdbcTemplate.update(
                 "INSERT INTO " + table("analysis_job_summary") + " ("
                         + "job_id, application, environment, parser_plugin_id, runtime_family, runtime_framework, runtime_profile, runtime_version, "
-                        + "status, source_type, total_input_lines, total_events, parsed_events, partial_events, unclassified_events, multiline_events, dropped_events, "
+                        + "status, source_type, total_input_lines, total_events, focused_events, parsed_events, partial_events, unclassified_events, multiline_events, dropped_events, "
                         + "total_gaps, min_gap_ms, max_gap_ms, avg_gap_ms, out_of_order_gaps, missing_timestamp_events, warning_count, created_at, updated_at"
-                        + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 analysisJob.jobId(),
                 analysisJob.application(),
                 analysisJob.environment(),
@@ -73,6 +73,7 @@ public final class JdbcAnalysisSummaryStore implements AnalysisSummaryStore {
                 analysisJob.sourceType().name(),
                 summary.counts().totalInputLines(),
                 summary.counts().totalEvents(),
+                summary.counts().focusedEvents(),
                 summary.counts().parsedEvents(),
                 summary.counts().partialEvents(),
                 summary.counts().unclassifiedEvents(),
@@ -117,20 +118,21 @@ public final class JdbcAnalysisSummaryStore implements AnalysisSummaryStore {
             SignatureSummary signature = signatures.get(index);
             jdbcTemplate.update(
                     "INSERT INTO " + table("analysis_signature_summary") + " ("
-                            + "job_id, rank_index, signature_hash, normalized_message, level_name, logger_name, exception_class, root_cause_class, "
-                            + "first_seen_timestamp, last_seen_timestamp, event_count"
-                            + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            + "job_id, rank_index, signature_hash, package_name, representative_logger, sample_messages, highlights, "
+                            + "first_seen_timestamp, last_seen_timestamp, event_count, exception_count, large_gap_count"
+                            + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     jobId,
                     index + 1,
                     signature.signatureHash(),
-                    signature.normalizedMessage(),
-                    signature.level(),
-                    signature.logger(),
-                    signature.exceptionClass(),
-                    signature.rootCauseClass(),
+                    signature.packageName(),
+                    signature.representativeLogger(),
+                    String.join("\n", signature.sampleMessages()),
+                    String.join("\n", signature.highlights()),
                     signature.firstSeenTimestamp(),
                     signature.lastSeenTimestamp(),
-                    signature.count()
+                    signature.count(),
+                    signature.exceptionCount(),
+                    signature.largeGapCount()
             );
         }
     }
@@ -174,6 +176,7 @@ public final class JdbcAnalysisSummaryStore implements AnalysisSummaryStore {
                         source_type VARCHAR(40) NOT NULL,
                         total_input_lines BIGINT NOT NULL,
                         total_events BIGINT NOT NULL,
+                        focused_events BIGINT NOT NULL,
                         parsed_events BIGINT NOT NULL,
                         partial_events BIGINT NOT NULL,
                         unclassified_events BIGINT NOT NULL,
@@ -214,14 +217,15 @@ public final class JdbcAnalysisSummaryStore implements AnalysisSummaryStore {
                         job_id UUID NOT NULL,
                         rank_index INTEGER NOT NULL,
                         signature_hash VARCHAR(64) NOT NULL,
-                        normalized_message VARCHAR(2000) NOT NULL,
-                        level_name VARCHAR(40),
-                        logger_name VARCHAR(255),
-                        exception_class VARCHAR(255),
-                        root_cause_class VARCHAR(255),
+                        package_name VARCHAR(255) NOT NULL,
+                        representative_logger VARCHAR(255),
+                        sample_messages VARCHAR(4000),
+                        highlights VARCHAR(4000),
                         first_seen_timestamp VARCHAR(80),
                         last_seen_timestamp VARCHAR(80),
                         event_count BIGINT NOT NULL,
+                        exception_count BIGINT NOT NULL,
+                        large_gap_count BIGINT NOT NULL,
                         PRIMARY KEY (job_id, rank_index)
                     )
                     """.formatted(table("analysis_signature_summary")));

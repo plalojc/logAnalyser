@@ -1,5 +1,6 @@
 package com.caseroot.loganalyser.core.application;
 
+import com.caseroot.loganalyser.domain.model.AnalysisOptions;
 import com.caseroot.loganalyser.domain.model.SourceType;
 
 public record CreateAnalysisJobCommand(
@@ -8,7 +9,7 @@ public record CreateAnalysisJobCommand(
         String originalFileName,
         String application,
         String environment,
-        String requestedParserProfile
+        String requestedParserProfile,
+        AnalysisOptions analysisOptions
 ) {
 }
-

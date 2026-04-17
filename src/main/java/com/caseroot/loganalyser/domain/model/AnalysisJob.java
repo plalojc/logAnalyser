@@ -11,6 +11,7 @@ public record AnalysisJob(
         String originalFileName,
         String application,
         String environment,
+        AnalysisOptions analysisOptions,
         String requestedParserProfile,
         String selectedParserPlugin,
         RuntimeDescriptor runtimeDescriptor,

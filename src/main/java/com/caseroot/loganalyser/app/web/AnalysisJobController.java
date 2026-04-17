@@ -2,6 +2,8 @@ package com.caseroot.loganalyser.app.web;
 
 import com.caseroot.loganalyser.core.application.AnalysisApplicationService;
 import com.caseroot.loganalyser.core.application.CreateAnalysisJobCommand;
+import com.caseroot.loganalyser.domain.model.AnalysisFocus;
+import com.caseroot.loganalyser.domain.model.AnalysisOptions;
 import com.caseroot.loganalyser.domain.model.AnalysisJob;
 import com.caseroot.loganalyser.domain.model.AnalysisSummary;
 import com.caseroot.loganalyser.domain.model.ArtifactDescriptor;
@@ -31,6 +33,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -54,7 +57,8 @@ public class AnalysisJobController {
                 deriveOriginalFileName(request),
                 request.application(),
                 request.environment(),
-                request.requestedParserProfile()
+                request.requestedParserProfile(),
+                toAnalysisOptions(request.largeGapHighlightThresholdMinutes(), request.analysisFocus())
         ));
 
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(job);
@@ -65,7 +69,9 @@ public class AnalysisJobController {
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "application", required = false) String application,
             @RequestParam(value = "environment", required = false) String environment,
-            @RequestParam(value = "requestedParserProfile", required = false) String requestedParserProfile
+            @RequestParam(value = "requestedParserProfile", required = false) String requestedParserProfile,
+            @RequestParam(value = "largeGapHighlightThresholdMinutes", required = false) Long largeGapHighlightThresholdMinutes,
+            @RequestParam(value = "analysisFocus", required = false) List<String> analysisFocus
     ) {
         if (file.isEmpty()) {
             throw new IllegalArgumentException("Uploaded file is required.");
@@ -82,7 +88,8 @@ public class AnalysisJobController {
                     file.getOriginalFilename(),
                     application,
                     environment,
-                    requestedParserProfile
+                    requestedParserProfile,
+                    toAnalysisOptions(largeGapHighlightThresholdMinutes, analysisFocus)
             ));
 
             return ResponseEntity.status(HttpStatus.ACCEPTED).body(job);
@@ -212,6 +219,28 @@ public class AnalysisJobController {
 
     private String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value;
+    }
+
+    private AnalysisOptions toAnalysisOptions(Long largeGapHighlightThresholdMinutes, List<String> analysisFocus) {
+        Long thresholdMs = null;
+        if (largeGapHighlightThresholdMinutes != null) {
+            if (largeGapHighlightThresholdMinutes < 0) {
+                throw new IllegalArgumentException("largeGapHighlightThresholdMinutes must be zero or greater.");
+            }
+            thresholdMs = largeGapHighlightThresholdMinutes * 60_000L;
+        }
+
+        List<AnalysisFocus> focusSelections = new ArrayList<>();
+        if (analysisFocus != null) {
+            for (String value : analysisFocus) {
+                if (value == null || value.isBlank()) {
+                    continue;
+                }
+                focusSelections.add(AnalysisFocus.valueOf(value.trim().toUpperCase()));
+            }
+        }
+
+        return new AnalysisOptions(thresholdMs, focusSelections);
     }
 
     private String downloadName(AnalysisJob job, ArtifactDescriptor artifact, Path artifactPath) {

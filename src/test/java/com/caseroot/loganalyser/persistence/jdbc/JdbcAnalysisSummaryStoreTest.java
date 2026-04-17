@@ -2,6 +2,7 @@ package com.caseroot.loganalyser.persistence.jdbc;
 
 import com.caseroot.loganalyser.domain.model.AnalysisJob;
 import com.caseroot.loganalyser.domain.model.AnalysisJobStatus;
+import com.caseroot.loganalyser.domain.model.AnalysisOptions;
 import com.caseroot.loganalyser.domain.model.AnalysisSummary;
 import com.caseroot.loganalyser.domain.model.AnalysisSummaryCounts;
 import com.caseroot.loganalyser.domain.model.ExceptionSummary;
@@ -40,6 +41,7 @@ class JdbcAnalysisSummaryStoreTest {
                 "sample.log",
                 "order-service",
                 "prod",
+                new AnalysisOptions(null, List.of()),
                 "log4j_pattern",
                 "legacy-java-parser",
                 new RuntimeDescriptor("java", "legacy-java-logs", "legacy_java", "1.0.0"),
@@ -52,19 +54,23 @@ class JdbcAnalysisSummaryStoreTest {
                 new AnalysisSummary(
                         "legacy-java-parser",
                         new RuntimeDescriptor("java", "legacy-java-logs", "legacy_java", "1.0.0"),
-                        new AnalysisSummaryCounts(4, 2, 2, 0, 0, 1, 0),
+                        new AnalysisSummaryCounts(4, 2, 2, 2, 0, 0, 1, 0),
                         Map.of("ERROR", 1L, "INFO", 1L),
                         new GapStatistics(1, 877L, 877L, 877.0, 0, 0, Map.of("100ms-1s", 1L)),
                         List.of(new SignatureSummary(
                                 "abc12345",
-                                "Failed order <NUM>",
-                                "ERROR",
+                                "com.acme",
                                 "com.acme.OrderService",
-                                "java.lang.IllegalStateException",
-                                "java.sql.SQLException",
                                 "2026-04-13 10:15:30,123",
                                 "2026-04-13 10:15:30,123",
-                                1
+                                1,
+                                Map.of("ERROR", 1L),
+                                1,
+                                0,
+                                List.of("Failed order <NUM>"),
+                                List.of(),
+                                List.of(),
+                                List.of("Exception: java.lang.IllegalStateException -> java.sql.SQLException")
                         )),
                         List.of(new ExceptionSummary(
                                 "java.lang.IllegalStateException",

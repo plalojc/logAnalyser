@@ -2,6 +2,7 @@ package com.caseroot.loganalyser.app.web;
 
 import com.caseroot.loganalyser.core.application.AnalysisApplicationService;
 import com.caseroot.loganalyser.core.application.CreateAnalysisJobCommand;
+import com.caseroot.loganalyser.domain.model.AnalysisOptions;
 import com.caseroot.loganalyser.domain.model.AnalysisJobStatus;
 import com.caseroot.loganalyser.domain.model.SourceType;
 import org.junit.jupiter.api.Test;
@@ -58,7 +59,8 @@ class ComparisonAndParquetIntegrationTest {
                 inputOne.getFileName().toString(),
                 "order-service",
                 "prod",
-                "log4j_pattern"
+                "log4j_pattern",
+                new AnalysisOptions(null, List.of())
         )).jobId(), Duration.ofSeconds(8));
 
         var jobTwo = awaitCompletion(analysisApplicationService.createJob(new CreateAnalysisJobCommand(
@@ -67,7 +69,8 @@ class ComparisonAndParquetIntegrationTest {
                 inputTwo.getFileName().toString(),
                 "order-service",
                 "prod",
-                "log4j_pattern"
+                "log4j_pattern",
+                new AnalysisOptions(null, List.of())
         )).jobId(), Duration.ofSeconds(8));
 
         Path parquetPath = Path.of(jobOne.artifacts().get("parquet-events").location());

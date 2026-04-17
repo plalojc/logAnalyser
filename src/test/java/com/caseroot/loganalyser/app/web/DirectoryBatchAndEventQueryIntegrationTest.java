@@ -2,6 +2,7 @@ package com.caseroot.loganalyser.app.web;
 
 import com.caseroot.loganalyser.core.application.AnalysisApplicationService;
 import com.caseroot.loganalyser.core.application.CreateAnalysisJobCommand;
+import com.caseroot.loganalyser.domain.model.AnalysisOptions;
 import com.caseroot.loganalyser.domain.model.AnalysisJobStatus;
 import com.caseroot.loganalyser.domain.model.EventQueryFilter;
 import com.caseroot.loganalyser.domain.model.SourceType;
@@ -16,6 +17,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -55,7 +57,8 @@ class DirectoryBatchAndEventQueryIntegrationTest {
                 "batch",
                 "order-service",
                 "prod",
-                "log4j_pattern"
+                "log4j_pattern",
+                new AnalysisOptions(null, List.of())
         ));
 
         var completedJob = awaitCompletion(submittedJob.jobId(), Duration.ofSeconds(5));

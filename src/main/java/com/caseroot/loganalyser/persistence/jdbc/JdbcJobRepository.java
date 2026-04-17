@@ -1,6 +1,7 @@
 package com.caseroot.loganalyser.persistence.jdbc;
 
 import com.caseroot.loganalyser.domain.model.AnalysisJob;
+import com.caseroot.loganalyser.domain.model.AnalysisOptions;
 import com.caseroot.loganalyser.domain.model.AnalysisSummary;
 import com.caseroot.loganalyser.domain.model.ArtifactDescriptor;
 import com.caseroot.loganalyser.domain.model.CaseRootBundle;
@@ -51,9 +52,9 @@ public final class JdbcJobRepository implements JobRepository {
         jdbcTemplate.update(
                 "INSERT INTO " + table("analysis_job") + " ("
                         + "job_id, source_type, source_location, original_file_name, application, environment, requested_parser_profile, "
-                        + "selected_parser_plugin, runtime_descriptor_json, status, created_at, updated_at, retention_policy_json, artifacts_json, "
+                        + "analysis_options_json, selected_parser_plugin, runtime_descriptor_json, status, created_at, updated_at, retention_policy_json, artifacts_json, "
                         + "caseroot_bundle_json, summary_json, failure_reason"
-                        + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 analysisJob.jobId(),
                 analysisJob.sourceType().name(),
                 analysisJob.sourceLocation(),
@@ -61,6 +62,7 @@ public final class JdbcJobRepository implements JobRepository {
                 analysisJob.application(),
                 analysisJob.environment(),
                 analysisJob.requestedParserProfile(),
+                writeJson(analysisJob.analysisOptions()),
                 analysisJob.selectedParserPlugin(),
                 writeJson(analysisJob.runtimeDescriptor()),
                 analysisJob.status().name(),
@@ -103,6 +105,7 @@ public final class JdbcJobRepository implements JobRepository {
                 resultSet.getString("original_file_name"),
                 resultSet.getString("application"),
                 resultSet.getString("environment"),
+                readJson(resultSet.getString("analysis_options_json"), AnalysisOptions.class),
                 resultSet.getString("requested_parser_profile"),
                 resultSet.getString("selected_parser_plugin"),
                 readJson(resultSet.getString("runtime_descriptor_json"), RuntimeDescriptor.class),
@@ -136,6 +139,7 @@ public final class JdbcJobRepository implements JobRepository {
                         application VARCHAR(200),
                         environment VARCHAR(120),
                         requested_parser_profile VARCHAR(120),
+                        analysis_options_json TEXT,
                         selected_parser_plugin VARCHAR(160),
                         runtime_descriptor_json TEXT,
                         status VARCHAR(40) NOT NULL,

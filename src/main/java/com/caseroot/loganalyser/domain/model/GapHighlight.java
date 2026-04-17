@@ -3,9 +3,10 @@ package com.caseroot.loganalyser.domain.model;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record ExceptionSummary(
-        String exceptionClass,
-        String rootCauseClass,
-        long count
+public record GapHighlight(
+        long gapMs,
+        long occurrenceCount,
+        EventSnippet previousEvent,
+        EventSnippet currentEvent
 ) {
 }

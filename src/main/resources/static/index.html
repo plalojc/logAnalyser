@@ -9,12 +9,14 @@
 <body>
 <main class="shell">
     <section class="hero">
-        <div>
-            <p class="eyebrow">Phase 4 Dashboard</p>
+        <div class="hero-copy">
+            <p class="eyebrow">CaseRoot Log Analysis</p>
             <h1>CaseRoot LogAnalyser</h1>
-            <p class="lede">Upload logs, submit file or directory paths, inspect parsed artifacts, and prepare clean evidence for CaseRoot without leaving the service.</p>
+            <p class="lede">Upload a log, run focused analysis, and generate cleaner evidence for CaseRoot.</p>
         </div>
-        <button id="refreshButton" class="accent-button">Refresh</button>
+        <div class="hero-actions">
+            <button id="refreshButton" class="ghost-button" type="button">Refresh Data</button>
+        </div>
     </section>
 
     <section class="metrics-grid" id="metricsGrid"></section>
@@ -23,9 +25,9 @@
         <div class="panel-header">
             <div>
                 <p class="eyebrow">Ingestion</p>
-                <h2>Analyze A Log</h2>
+                <h2>Analyze Log</h2>
             </div>
-            <span class="hint">Default flow: upload a file, add app name, click analyze. Log format is detected automatically.</span>
+            <span class="hint">Log format is detected automatically. Use upload for normal work and server path only for shared-host files.</span>
         </div>
         <div class="mode-switch" role="tablist" aria-label="Job submission mode">
             <button id="uploadModeButton" class="mode-button active" type="button">Upload File</button>
@@ -45,7 +47,49 @@
                     Environment
                     <input id="uploadEnvironment" name="environment" type="text" placeholder="prod">
                 </label>
-                <button class="accent-button" type="submit">Analyze Uploaded File</button>
+                <label>
+                    Gap Highlight (minutes)
+                    <input id="uploadGapThresholdMinutes" name="largeGapHighlightThresholdMinutes" type="number" min="0" step="1" value="1">
+                </label>
+                <div class="wide-field focus-field">
+                    <div class="field-label-row">
+                        <span class="field-title">Analysis Focus</span>
+                        <span id="uploadFocusSummary" class="field-summary">All log categories</span>
+                    </div>
+                    <div id="uploadFocusGroup" class="focus-checklist" role="group" aria-label="Upload analysis focus">
+                        <label class="focus-check focus-check-all">
+                            <input type="checkbox" data-focus-value="ALL" checked>
+                            <span>All</span>
+                        </label>
+                        <label class="focus-check">
+                            <input type="checkbox" data-focus-value="ERROR" checked>
+                            <span>Error</span>
+                        </label>
+                        <label class="focus-check">
+                            <input type="checkbox" data-focus-value="EXCEPTION" checked>
+                            <span>Exception</span>
+                        </label>
+                        <label class="focus-check">
+                            <input type="checkbox" data-focus-value="WARN" checked>
+                            <span>Warn</span>
+                        </label>
+                        <label class="focus-check">
+                            <input type="checkbox" data-focus-value="INFO" checked>
+                            <span>Info</span>
+                        </label>
+                        <label class="focus-check">
+                            <input type="checkbox" data-focus-value="DEBUG" checked>
+                            <span>Debug</span>
+                        </label>
+                        <label class="focus-check">
+                            <input type="checkbox" data-focus-value="TRACE" checked>
+                            <span>Trace</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button class="accent-button" type="submit">Analyze Uploaded File</button>
+                </div>
             </form>
         </div>
         <div id="pathModePanel" class="mode-panel">
@@ -73,7 +117,49 @@
                     Environment
                     <input id="pathEnvironment" name="environment" type="text" placeholder="prod">
                 </label>
-                <button class="accent-button" type="submit">Submit Path Job</button>
+                <label>
+                    Gap Highlight (minutes)
+                    <input id="pathGapThresholdMinutes" name="largeGapHighlightThresholdMinutes" type="number" min="0" step="1" value="1">
+                </label>
+                <div class="wide-field focus-field">
+                    <div class="field-label-row">
+                        <span class="field-title">Analysis Focus</span>
+                        <span id="pathFocusSummary" class="field-summary">All log categories</span>
+                    </div>
+                    <div id="pathFocusGroup" class="focus-checklist" role="group" aria-label="Path analysis focus">
+                        <label class="focus-check focus-check-all">
+                            <input type="checkbox" data-focus-value="ALL" checked>
+                            <span>All</span>
+                        </label>
+                        <label class="focus-check">
+                            <input type="checkbox" data-focus-value="ERROR" checked>
+                            <span>Error</span>
+                        </label>
+                        <label class="focus-check">
+                            <input type="checkbox" data-focus-value="EXCEPTION" checked>
+                            <span>Exception</span>
+                        </label>
+                        <label class="focus-check">
+                            <input type="checkbox" data-focus-value="WARN" checked>
+                            <span>Warn</span>
+                        </label>
+                        <label class="focus-check">
+                            <input type="checkbox" data-focus-value="INFO" checked>
+                            <span>Info</span>
+                        </label>
+                        <label class="focus-check">
+                            <input type="checkbox" data-focus-value="DEBUG" checked>
+                            <span>Debug</span>
+                        </label>
+                        <label class="focus-check">
+                            <input type="checkbox" data-focus-value="TRACE" checked>
+                            <span>Trace</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button class="accent-button" type="submit">Submit Path Job</button>
+                </div>
             </form>
         </div>
         <div id="jobSubmissionResult" class="result-block empty">No job submitted yet.</div>
@@ -85,7 +171,7 @@
                 <p class="eyebrow">Overview</p>
                 <h2>Recent Jobs</h2>
             </div>
-            <span class="hint">Select two or more jobs for comparison.</span>
+            <span class="hint">Open a job to inspect the generated CaseRoot evidence bundle.</span>
         </div>
         <div class="table-wrap">
             <table>
@@ -104,7 +190,7 @@
             </table>
         </div>
         <div class="actions">
-            <button id="compareButton" class="accent-button">Compare Selected Jobs</button>
+            <button id="compareButton" class="ghost-button" type="button">Compare Selected Jobs</button>
         </div>
         <div id="comparisonResult" class="result-block"></div>
     </section>
@@ -118,39 +204,6 @@
             <span class="hint">Open a job to inspect summary, CaseRoot bundle, and artifact downloads.</span>
         </div>
         <div id="jobDetail" class="result-block empty">Select a job from the table or submit a new one.</div>
-    </section>
-
-    <section class="panel">
-        <div class="panel-header">
-            <div>
-                <p class="eyebrow">Event Search</p>
-                <h2>Query Parsed Artifacts</h2>
-            </div>
-        </div>
-        <form id="eventQueryForm" class="query-form">
-            <label>
-                Job ID
-                <input id="queryJobId" name="jobId" type="text" placeholder="Paste a completed job id">
-            </label>
-            <label>
-                Level
-                <input id="queryLevel" name="level" type="text" placeholder="ERROR">
-            </label>
-            <label>
-                Source File
-                <input id="querySourceFile" name="sourceFile" type="text" placeholder="server.log">
-            </label>
-            <label>
-                Contains
-                <input id="queryContains" name="contains" type="text" placeholder="Failed order">
-            </label>
-            <label>
-                Limit
-                <input id="queryLimit" name="limit" type="number" min="1" max="1000" value="25">
-            </label>
-            <button class="accent-button" type="submit">Run Query</button>
-        </form>
-        <pre id="eventQueryResult" class="code-block"></pre>
     </section>
 </main>
 <script src="/app.js"></script>

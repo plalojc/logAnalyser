@@ -1,5 +1,6 @@
 package com.caseroot.loganalyser.core.ingest;
 
+import com.caseroot.loganalyser.domain.model.AnalysisOptions;
 import com.caseroot.loganalyser.domain.model.AnalysisSummary;
 import com.caseroot.loganalyser.domain.model.ArtifactDescriptor;
 import com.caseroot.loganalyser.domain.model.LogEvent;
@@ -18,6 +19,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -27,22 +29,34 @@ public final class FileAnalysisProcessor {
 
     private final ObjectMapper objectMapper;
     private final MultilineEventReader multilineEventReader;
+    private final long largeGapHighlightThresholdMs;
 
     public FileAnalysisProcessor() {
+        this(Duration.ofMinutes(1));
+    }
+
+    public FileAnalysisProcessor(Duration largeGapHighlightThreshold) {
         this.objectMapper = new ObjectMapper()
                 .registerModule(new JavaTimeModule())
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
         this.multilineEventReader = new MultilineEventReader();
+        this.largeGapHighlightThresholdMs = largeGapHighlightThreshold == null
+                ? Duration.ofMinutes(1).toMillis()
+                : largeGapHighlightThreshold.toMillis();
     }
 
     public AnalysisSummary process(
             UUID jobId,
             java.util.List<Path> inputPaths,
             ParserPlugin parserPlugin,
+            AnalysisOptions analysisOptions,
             ArtifactDescriptor parsedArtifact,
             ArtifactDescriptor summaryArtifact
     ) {
-        AnalysisSummaryAccumulator accumulator = new AnalysisSummaryAccumulator();
+        long thresholdMs = analysisOptions != null && analysisOptions.largeGapHighlightThresholdMs() != null
+                ? analysisOptions.largeGapHighlightThresholdMs()
+                : largeGapHighlightThresholdMs;
+        AnalysisSummaryAccumulator accumulator = new AnalysisSummaryAccumulator(thresholdMs, analysisOptions);
         Path parsedPath = Path.of(parsedArtifact.location());
         Path summaryPath = Path.of(summaryArtifact.location());
 

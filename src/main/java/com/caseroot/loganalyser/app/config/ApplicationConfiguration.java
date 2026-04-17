@@ -203,8 +203,8 @@ public class ApplicationConfiguration {
     }
 
     @Bean
-    FileAnalysisProcessor fileAnalysisProcessor() {
-        return new FileAnalysisProcessor();
+    FileAnalysisProcessor fileAnalysisProcessor(LogAnalyserOutputProperties properties) {
+        return new FileAnalysisProcessor(properties.getLargeGapHighlightThreshold());
     }
 
     @Bean

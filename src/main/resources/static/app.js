@@ -1,8 +1,6 @@
 const metricsGrid = document.getElementById("metricsGrid");
 const jobsTableBody = document.getElementById("jobsTableBody");
 const comparisonResult = document.getElementById("comparisonResult");
-const eventQueryForm = document.getElementById("eventQueryForm");
-const eventQueryResult = document.getElementById("eventQueryResult");
 const refreshButton = document.getElementById("refreshButton");
 const compareButton = document.getElementById("compareButton");
 const pathJobForm = document.getElementById("pathJobForm");
@@ -47,13 +45,115 @@ function formatJson(value) {
     return escapeHtml(JSON.stringify(value, null, 2));
 }
 
+function createFocusController(config) {
+    const group = document.getElementById(config.groupId);
+    const summary = document.getElementById(config.summaryId);
+    const checkboxes = Array.from(group.querySelectorAll("input[type='checkbox']"));
+    const allCheckbox = checkboxes.find((checkbox) => checkbox.dataset.focusValue === "ALL");
+    const specificCheckboxes = checkboxes.filter((checkbox) => checkbox.dataset.focusValue !== "ALL");
+
+    function selectedSpecificValues() {
+        return specificCheckboxes
+            .filter((checkbox) => checkbox.checked)
+            .map((checkbox) => checkbox.dataset.focusValue);
+    }
+
+    function renderSummary() {
+        if (allCheckbox.checked) {
+            summary.textContent = "All log categories";
+        } else {
+            const specificValues = selectedSpecificValues();
+            if (!specificValues.length) {
+                summary.textContent = "Choose one or more categories";
+            } else {
+                summary.textContent = specificValues
+                    .map((value) => value.charAt(0) + value.slice(1).toLowerCase())
+                    .join(", ");
+            }
+        }
+    }
+
+    function setAllSelections(checked) {
+        allCheckbox.checked = checked;
+        specificCheckboxes.forEach((checkbox) => {
+            checkbox.checked = checked;
+        });
+        renderSummary();
+    }
+
+    function syncAllCheckbox() {
+        const checkedCount = selectedSpecificValues().length;
+        if (checkedCount === specificCheckboxes.length) {
+            allCheckbox.checked = true;
+        } else {
+            allCheckbox.checked = false;
+        }
+        renderSummary();
+    }
+
+    allCheckbox.addEventListener("change", () => {
+        if (allCheckbox.checked) {
+            setAllSelections(true);
+            return;
+        }
+
+        if (selectedSpecificValues().length === specificCheckboxes.length) {
+            specificCheckboxes.forEach((checkbox) => {
+                checkbox.checked = false;
+            });
+        }
+        renderSummary();
+    });
+
+    specificCheckboxes.forEach((checkbox) => {
+        checkbox.addEventListener("change", () => {
+            syncAllCheckbox();
+        });
+    });
+
+    setAllSelections(true);
+
+    return {
+        values() {
+            if (allCheckbox.checked) {
+                return ["ALL"];
+            }
+            return selectedSpecificValues();
+        }
+    };
+}
+
+const uploadFocusController = createFocusController({
+    groupId: "uploadFocusGroup",
+    summaryId: "uploadFocusSummary"
+});
+
+const pathFocusController = createFocusController({
+    groupId: "pathFocusGroup",
+    summaryId: "pathFocusSummary"
+});
+
+function getSelectedFocusValues(controller) {
+    const values = controller.values();
+    if (values.includes("ALL")) {
+        return ["ALL"];
+    }
+    return values;
+}
+
+function clearOnlyFileInput(inputId) {
+    const input = document.getElementById(inputId);
+    if (input) {
+        input.value = "";
+    }
+}
+
 function renderOverview(overview) {
     metricsGrid.innerHTML = [
         metricCard("Total Jobs", overview.totalJobs),
         metricCard("Completed", overview.completedJobs),
         metricCard("Running", overview.runningJobs),
         metricCard("Failed", overview.failedJobs),
-        metricCard("Accepted", overview.acceptedJobs),
         metricCard("Events", overview.totalEventsAcrossCompletedJobs)
     ].join("");
 }
@@ -79,8 +179,8 @@ function renderJobs(jobs) {
 
 function renderComparison(result) {
     const signatures = result.commonSignatures.length
-        ? result.commonSignatures.map((item) => `<li>${escapeHtml(item.normalizedMessage)} <strong>(${item.totalCount})</strong></li>`).join("")
-        : `<li class="empty">No shared signatures across the selected jobs.</li>`;
+        ? result.commonSignatures.map((item) => `<li>${escapeHtml(item.packageName)}${item.representativeMessage ? ` - ${escapeHtml(item.representativeMessage)}` : ""} <strong>(${item.totalCount})</strong></li>`).join("")
+        : `<li class="empty">No shared package groups across the selected jobs.</li>`;
 
     const exceptions = result.commonExceptions.length
         ? result.commonExceptions.map((item) => `<li>${escapeHtml(item.exceptionClass || "Unknown")} <strong>(${item.totalCount})</strong></li>`).join("")
@@ -92,7 +192,7 @@ function renderComparison(result) {
             <p>${result.jobIds.map((jobId) => escapeHtml(jobId)).join(", ")}</p>
         </div>
         <div class="subsection">
-            <h3>Shared Signatures</h3>
+            <h3>Shared Package Groups</h3>
             <ul>${signatures}</ul>
         </div>
         <div class="subsection">
@@ -123,7 +223,7 @@ function renderSubmissionResult(job, message) {
 
 function renderMessage(message, isError = false) {
     jobSubmissionResult.classList.remove("empty");
-    jobSubmissionResult.innerHTML = `<div class="${isError ? "empty" : ""}">${escapeHtml(message)}</div>`;
+    jobSubmissionResult.innerHTML = `<div class="${isError ? "feedback-error" : "feedback-info"}">${escapeHtml(message)}</div>`;
 }
 
 function setSubmissionMode(mode) {
@@ -157,6 +257,17 @@ function renderJobDetail(job) {
         ? `<ul>${summary.warnings.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
         : `<p class="empty">No summary warnings recorded.</p>`;
 
+    const topSignature = (summary.topSignatures || [])[0];
+    const topPackage = topSignature
+        ? {
+            packageName: topSignature.packageName,
+            count: topSignature.count,
+            exceptionCount: topSignature.exceptionCount,
+            largeGapCount: topSignature.largeGapCount,
+            sampleMessages: topSignature.sampleMessages
+        }
+        : null;
+
     jobDetail.classList.remove("empty");
     jobDetail.innerHTML = `
         <div class="status-line">
@@ -172,28 +283,27 @@ function renderJobDetail(job) {
                 originalFileName: job.originalFileName,
                 application: job.application,
                 environment: job.environment,
-                requestedParserProfile: job.requestedParserProfile,
+                analysisOptions: job.analysisOptions,
                 runtimeDescriptor: job.runtimeDescriptor,
                 failureReason: job.failureReason
             })}</pre>
         </div>
         <div class="subsection">
-            <h3>Counts</h3>
+            <h3>Summary</h3>
             <pre class="code-block">${formatJson({
                 totalEvents: counts.totalEvents || 0,
+                focusedEvents: counts.focusedEvents || 0,
                 parsedEvents: counts.parsedEvents || 0,
                 partialEvents: counts.partialEvents || 0,
                 unclassifiedEvents: counts.unclassifiedEvents || 0,
-                multilineEvents: counts.multilineEvents || 0
+                multilineEvents: counts.multilineEvents || 0,
+                levelCounts: summary.levelCounts || {},
+                topExceptions: summary.topExceptions || []
             })}</pre>
         </div>
         <div class="subsection">
-            <h3>Top Signatures</h3>
-            <pre class="code-block">${formatJson(summary.topSignatures || [])}</pre>
-        </div>
-        <div class="subsection">
-            <h3>Top Exceptions</h3>
-            <pre class="code-block">${formatJson(summary.topExceptions || [])}</pre>
+            <h3>Primary Package Group</h3>
+            <pre class="code-block">${formatJson(topPackage || {})}</pre>
         </div>
         <div class="subsection">
             <h3>CaseRoot Bundle</h3>
@@ -208,19 +318,11 @@ function renderJobDetail(job) {
             <div class="artifact-links">${artifactLinks || `<span class="empty">No artifacts available yet.</span>`}</div>
         </div>
         <div class="inline-actions">
-            <button type="button" class="ghost-button" id="prefillEventQuery">Search This Job</button>
             <button type="button" class="ghost-button" id="refreshSelectedJob">Refresh This Job</button>
         </div>
     `;
 
-    const prefillButton = document.getElementById("prefillEventQuery");
     const refreshButton = document.getElementById("refreshSelectedJob");
-    if (prefillButton) {
-        prefillButton.addEventListener("click", () => {
-            document.getElementById("queryJobId").value = job.jobId;
-            document.getElementById("queryContains").focus();
-        });
-    }
     if (refreshButton) {
         refreshButton.addEventListener("click", () => loadJobDetail(job.jobId));
     }
@@ -265,8 +367,15 @@ pathJobForm.addEventListener("submit", async (event) => {
         sourceLocation: document.getElementById("sourceLocation").value.trim(),
         originalFileName: document.getElementById("originalFileName").value.trim(),
         application: document.getElementById("pathApplication").value.trim(),
-        environment: document.getElementById("pathEnvironment").value.trim()
+        environment: document.getElementById("pathEnvironment").value.trim(),
+        largeGapHighlightThresholdMinutes: Number(document.getElementById("pathGapThresholdMinutes").value || "1"),
+        analysisFocus: getSelectedFocusValues(pathFocusController)
     };
+
+    if (!payload.analysisFocus.length) {
+        renderMessage("Select at least one analysis focus category or enable all log categories.", true);
+        return;
+    }
 
     try {
         const submittedJob = await fetchJson("/api/v1/jobs", {
@@ -304,6 +413,13 @@ uploadJobForm.addEventListener("submit", async (event) => {
     if (environment) {
         formData.append("environment", environment);
     }
+    formData.append("largeGapHighlightThresholdMinutes", document.getElementById("uploadGapThresholdMinutes").value || "1");
+    const focusValues = getSelectedFocusValues(uploadFocusController);
+    if (!focusValues.length) {
+        renderMessage("Select at least one analysis focus category or enable all log categories.", true);
+        return;
+    }
+    focusValues.forEach((value) => formData.append("analysisFocus", value));
 
     try {
         const submittedJob = await fetchJson("/api/v1/jobs/upload", {
@@ -311,7 +427,7 @@ uploadJobForm.addEventListener("submit", async (event) => {
             body: formData
         });
         renderSubmissionResult(submittedJob, "Upload received. Polling until parsing finishes.");
-        uploadJobForm.reset();
+        clearOnlyFileInput("uploadFile");
         await refreshDashboard();
         const finalJob = await waitForTerminalState(submittedJob.jobId);
         renderSubmissionResult(finalJob, `Job finished with status ${finalJob.status}.`);
@@ -353,32 +469,6 @@ compareButton.addEventListener("click", async () => {
         renderComparison(result);
     } catch (error) {
         comparisonResult.innerHTML = `<p class="empty">${escapeHtml(error.message)}</p>`;
-    }
-});
-
-eventQueryForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const params = new URLSearchParams();
-    const jobId = document.getElementById("queryJobId").value.trim();
-
-    [["level", "queryLevel"], ["sourceFile", "querySourceFile"], ["contains", "queryContains"], ["limit", "queryLimit"]]
-        .forEach(([name, id]) => {
-            const value = document.getElementById(id).value.trim();
-            if (value) {
-                params.set(name, value);
-            }
-        });
-
-    if (!jobId) {
-        eventQueryResult.textContent = "A job id is required.";
-        return;
-    }
-
-    try {
-        const result = await fetchJson(`/api/v1/jobs/${jobId}/events?${params.toString()}`);
-        eventQueryResult.textContent = JSON.stringify(result, null, 2);
-    } catch (error) {
-        eventQueryResult.textContent = error.message;
     }
 });
 

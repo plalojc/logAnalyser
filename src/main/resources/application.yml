@@ -24,6 +24,7 @@ loganalyser:
     worker-threads: 2
   output:
     parquet-enabled: false
+    large-gap-highlight-threshold: 2m
   summary-store:
     enabled: false
     jdbc-url:
