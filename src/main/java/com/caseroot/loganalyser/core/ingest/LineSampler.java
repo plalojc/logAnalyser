@@ -3,8 +3,6 @@ package com.caseroot.loganalyser.core.ingest;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -20,7 +18,7 @@ public final class LineSampler {
 
         try {
             for (Path path : paths) {
-                try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+                try (BufferedReader reader = TextInputSupport.openReader(path)) {
                     String line;
                     while ((line = reader.readLine()) != null && lines.size() < maxLines) {
                         lines.add(line);

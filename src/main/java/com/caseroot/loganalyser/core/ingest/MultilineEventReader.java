@@ -4,8 +4,6 @@ import com.caseroot.loganalyser.domain.model.ReconstructedLogEvent;
 
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
@@ -20,7 +18,7 @@ public final class MultilineEventReader {
     );
 
     public void read(Path path, Consumer<ReconstructedLogEvent> consumer) throws IOException {
-        try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+        try (BufferedReader reader = TextInputSupport.openReader(path)) {
             StringBuilder currentEvent = new StringBuilder();
             long currentStartLine = 0;
             long currentEndLine = 0;
