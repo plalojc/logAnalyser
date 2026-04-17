@@ -1,67 +1,68 @@
 # CaseRoot LogAnalyser
 
-This workspace now contains a modular Spring Boot Phase 4 log analysis microservice that can sit beside CaseRoot.
+CaseRoot LogAnalyser is a Spring Boot microservice that parses application logs, preserves every log statement, produces structured evidence, and generates a CaseRoot-ready bundle for downstream code correlation and LLM response building.
 
-## Module layout
+It is designed for:
+- legacy Java applications first
+- future support for Python, .NET, and other runtimes
+- large-file parsing with filesystem-backed artifacts
+- zero-drop parsing where unclassified lines are still preserved
+- CaseRoot integration through `caseroot_input.json`
 
-- `loganalyser-domain`
-  Shared domain records and enums with no Spring dependency.
-- `loganalyser-spi`
-  Extension points for parsers, storage, retention, and CaseRoot export.
-- `loganalyser-core`
-  Plain Java orchestration, parser registry, streaming ingestion, multiline reconstruction, summary generation, and in-memory job repository.
-- `loganalyser-parser-java`
-  Legacy Java, JUL, WebLogic, WebSphere, and generic timestamped parser plugins.
-- `loganalyser-parser-polyglot`
-  Python logging/traceback and .NET text/JSON parser plugins.
-- `loganalyser-export-parquet`
-  Optional Parquet export for parsed event artifacts.
-- `loganalyser-storage-filesystem`
-  Filesystem-backed raw, parsed, Parquet, summary, and CaseRoot artifact allocation.
-- `loganalyser-caseroot-export`
-  CaseRoot bundle builder and bundle file writer.
-- `loganalyser-persistence-jdbc`
-  Optional JDBC aggregate persistence for summary tables without storing raw log blobs in the database.
-- `loganalyser-app`
-  Thin Spring Boot microservice that wires the modules, serves the API, and hosts the Phase 4 dashboard page.
+## What This Tool Does
 
-## Why this shape
+Given a log file, the service will:
+- detect the log format automatically
+- reconstruct multiline events such as Java stack traces
+- parse events into a canonical structure
+- group events by package instead of only by message text
+- normalize repeated messages and cluster related errors
+- calculate gap and timeline statistics
+- generate `summary.json`
+- generate `caseroot_input.json`
+- keep raw and parsed artifacts for retention-controlled download
 
-- keeps the Spring Boot runtime thin
-- keeps core parsing logic reusable outside the web layer
-- makes parser and storage implementations replaceable
-- reduces future coupling with CaseRoot while keeping the output contract close
+This tool is the log-analysis layer.  
+CaseRoot is the reasoning layer.
 
-## Phase 4 Capabilities
+The normal flow is:
+1. upload or submit a log source
+2. LogAnalyser parses and summarizes it
+3. LogAnalyser writes a compact CaseRoot evidence bundle
+4. CaseRoot reads that bundle and correlates it with the codebase
 
-- file-path job creation
-- multipart upload job creation
-- directory batch ingestion
-- asynchronous job execution with pollable job status
-- streaming line-by-line file reading
-- multiline event reconstruction for Java stack traces
-- Log4j / Logback style parsing
+## Current Architecture
+
+This project is now a single Spring Boot application with one root source tree:
+
+- `src/main/java`
+- `src/main/resources`
+- `src/test/java`
+
+There is no longer a Maven multi-module structure.
+
+## Main Capabilities
+
+- browser-based log upload
+- server file-path and directory submission
+- async job execution with pollable status
+- legacy Java parsing
 - JUL parsing
 - WebLogic parsing
 - WebSphere parsing
-- Python logging and traceback parsing
+- Python logging / traceback parsing
 - .NET text log parsing
 - .NET JSON log parsing
-- generic timestamped log parsing
-- message normalization and signature clustering
-- exception family aggregation
-- gap and timeline statistics
-- canonical event NDJSON artifact generation
-- optional Parquet artifact generation for downstream analytics
-- summary JSON generation
-- CaseRoot bundle JSON generation
-- filtered event query API over parsed artifacts
-- multi-job comparison API for shared signatures and shared exceptions
-- dashboard overview API for recent jobs and aggregate runtime/application metrics
-- built-in dashboard UI served from the Spring Boot app root
-- configurable filesystem-backed artifact retention locations
-- optional JDBC persistence of compact summary aggregates for PostgreSQL-style deployments
-- optional JDBC persistence of job state for restart-tolerant polling
+- generic timestamped fallback parsing
+- package-level grouping
+- exception aggregation
+- timeline gap detection
+- event artifact generation as `events.ndjson.gz`
+- optional Parquet export
+- CaseRoot bundle generation
+- artifact download
+- recent job inspection
+- job comparison
 
 ## Build
 
@@ -71,71 +72,185 @@ mvn clean package
 
 ## Run
 
+Run from the project root:
+
 ```powershell
-mvn -pl loganalyser-app spring-boot:run
+mvn spring-boot:run
 ```
 
-Default upload sizing:
+Or run the packaged jar:
 
-- browser and API multipart uploads are configured up to `1 GB`
-- for larger files or operational batch runs, `FILE_PATH` or `DIRECTORY` mode is still the better choice because it avoids HTTP upload overhead
+```powershell
+java -jar target\caseroot-loganalyser-0.1.0-SNAPSHOT.jar
+```
 
-The default HTTP base path is:
+Default server:
+
+- `http://localhost:8080`
+
+## Configuration
+
+Current default configuration is in [application.yml](C:/workspace/logAnalyser/src/main/resources/application.yml).
+
+Important defaults:
+
+- HTTP port: `8080`
+- upload size: `1 GB`
+- base artifact path: `var/loganalyser`
+- worker threads: `2`
+- default large-gap threshold: `2 minutes`
+- Parquet export: disabled by default
+- JDBC summary store: disabled by default
+
+Key properties:
+
+```yaml
+spring:
+  servlet:
+    multipart:
+      max-file-size: 1GB
+      max-request-size: 1GB
+
+loganalyser:
+  storage:
+    base-path: var/loganalyser
+  execution:
+    worker-threads: 2
+  output:
+    parquet-enabled: false
+    large-gap-highlight-threshold: 2m
+```
+
+## How To Use The UI
+
+Open:
+
+- `http://localhost:8080/`
+
+### Normal user flow
+
+Use `Upload File` mode for most cases.
+
+1. choose a log file
+2. enter `Application` if you want that value in the CaseRoot bundle
+3. enter `Environment` if needed
+4. set `Gap Highlight (minutes)` if you want a different threshold for this run
+5. choose `Analysis Focus`
+6. click `Analyze Uploaded File`
+
+### Analysis Focus behavior
+
+The focus controls are runtime options for summary generation.
+
+- `ALL` means all categories are included
+- if `ALL` is checked, all specific categories are checked too
+- if you uncheck one category, `ALL` is automatically unchecked
+- if you check all specific categories manually, `ALL` becomes checked again
+- if you want only a subset, leave only those checkboxes selected
+
+Examples:
+
+- only exceptions: check `EXCEPTION`
+- only debug and info: check `DEBUG` and `INFO`
+- errors plus warnings: check `ERROR` and `WARN`
+
+Important:
+- all raw events are still parsed and preserved in artifacts
+- focus affects summary grouping and CaseRoot-facing evidence, not raw preservation
+
+### When to use Server Path mode
+
+Use `Server Path` only when the log file already exists on the machine where this service is running.
+
+Supported source types:
+
+- `FILE_PATH`
+- `DIRECTORY`
+
+`DIRECTORY` is useful for batch analysis of many related logs.
+
+## How To Use The API
+
+Base path:
+
+- `/api/v1`
+
+### 1. Create a job from an existing file or directory
+
+Endpoint:
 
 - `POST /api/v1/jobs`
-- `POST /api/v1/jobs/upload`
-- `POST /api/v1/compare`
-- `GET /api/v1/jobs`
-- `GET /api/v1/jobs/{jobId}`
-- `GET /api/v1/jobs/{jobId}/summary`
-- `GET /api/v1/jobs/{jobId}/events`
-- `GET /api/v1/jobs/{jobId}/artifacts/{artifactKey}`
-- `GET /api/v1/dashboard/overview`
-- `GET /api/v1/modules`
 
-The dashboard UI is available at:
+Request body:
 
-- `GET /`
+```json
+{
+  "sourceType": "FILE_PATH",
+  "sourceLocation": "C:\\logs\\xdb.log",
+  "application": "db-service",
+  "environment": "prod",
+  "largeGapHighlightThresholdMinutes": 2,
+  "analysisFocus": ["ALL"]
+}
+```
 
-The UI now supports:
-
-- file upload from the browser
-- file-path and directory-path job submission
-- recent job inspection
-- artifact download links
-- event search and job comparison
-
-## Sample Request
+Directory example:
 
 ```json
 {
   "sourceType": "DIRECTORY",
   "sourceLocation": "C:\\logs\\batch",
-  "application": "order-service",
+  "application": "db-service",
   "environment": "prod",
-  "requestedParserProfile": "log4j_pattern"
+  "largeGapHighlightThresholdMinutes": 2,
+  "analysisFocus": ["ERROR", "EXCEPTION"]
 }
 ```
 
-## Generated Artifacts
+### 2. Upload a file directly
 
-By default the service writes artifacts under `var/loganalyser`:
+Endpoint:
 
-- `raw/<job-id>/...`
-- `parsed/<job-id>/events.ndjson.gz`
-- `parsed/<job-id>/events.parquet` when `loganalyser.output.parquet-enabled=true`
-- `summary/<job-id>/summary.json`
-- `caseroot/<job-id>/caseroot_input.json`
+- `POST /api/v1/jobs/upload`
 
-For directory jobs, the raw artifact path is a staged manifest and the copied source files sit beside it under the job-specific raw directory.
+Example with `curl`:
 
-## Event Query
-
-Filter parsed events without reprocessing the source logs:
-
-```text
-GET /api/v1/jobs/{jobId}/events?level=ERROR&sourceFile=app-1.log&contains=Failed&limit=50
+```bash
+curl -X POST "http://localhost:8080/api/v1/jobs/upload" \
+  -F "file=@C:/logs/xdb.log" \
+  -F "application=db-service" \
+  -F "environment=prod" \
+  -F "largeGapHighlightThresholdMinutes=2" \
+  -F "analysisFocus=ALL"
 ```
+
+Focused example:
+
+```bash
+curl -X POST "http://localhost:8080/api/v1/jobs/upload" \
+  -F "file=@C:/logs/xdb.log" \
+  -F "application=db-service" \
+  -F "environment=prod" \
+  -F "largeGapHighlightThresholdMinutes=2" \
+  -F "analysisFocus=INFO" \
+  -F "analysisFocus=EXCEPTION"
+```
+
+### 3. List jobs
+
+- `GET /api/v1/jobs`
+
+### 4. Get one job
+
+- `GET /api/v1/jobs/{jobId}`
+
+### 5. Get job summary
+
+- `GET /api/v1/jobs/{jobId}/summary`
+
+### 6. Query parsed events
+
+- `GET /api/v1/jobs/{jobId}/events`
 
 Supported filters:
 
@@ -147,15 +262,17 @@ Supported filters:
 - `contains`
 - `limit`
 
-## Artifact Download
-
-Download generated evidence for a completed or running job:
+Example:
 
 ```text
-GET /api/v1/jobs/{jobId}/artifacts/{artifactKey}
+GET /api/v1/jobs/{jobId}/events?level=ERROR&contains=subquery&limit=50
 ```
 
-Common keys:
+### 7. Download an artifact
+
+- `GET /api/v1/jobs/{jobId}/artifacts/{artifactKey}`
+
+Common artifact keys:
 
 - `raw`
 - `parsed-events`
@@ -163,13 +280,11 @@ Common keys:
 - `summary`
 - `caseroot-bundle`
 
-## Job Comparison
+### 8. Compare jobs
 
-Compare multiple completed jobs without reprocessing artifacts:
+- `POST /api/v1/compare`
 
-```text
-POST /api/v1/compare
-```
+Example:
 
 ```json
 {
@@ -180,32 +295,142 @@ POST /api/v1/compare
 }
 ```
 
-The response includes:
+### 9. Dashboard overview
 
-- per-job event totals
-- aggregated level counts across the selected jobs
-- common normalized signatures
-- common exception and root-cause families
+- `GET /api/v1/dashboard/overview`
 
-## Dashboard Overview
+### 10. List registered modules
 
-Fetch the aggregate dashboard model used by the built-in UI:
+- `GET /api/v1/modules`
 
-```text
-GET /api/v1/dashboard/overview
-```
+## Job Lifecycle
 
-The response includes:
+Typical statuses:
 
-- total jobs by lifecycle state
-- total events across completed jobs
-- job counts by application
-- job counts by runtime family
-- recent jobs ready for comparison
+- `ACCEPTED`
+- `RUNNING`
+- `COMPLETED`
+- `FAILED`
+
+Recommended polling:
+
+1. create the job
+2. keep calling `GET /api/v1/jobs/{jobId}`
+3. wait until status becomes `COMPLETED` or `FAILED`
+
+## Generated Artifacts
+
+By default, artifacts are stored under:
+
+- `var/loganalyser`
+
+Per job, common outputs are:
+
+- `raw/<job-id>/...`
+- `parsed/<job-id>/events.ndjson.gz`
+- `parsed/<job-id>/events.parquet` when enabled
+- `summary/<job-id>/summary.json`
+- `caseroot/<job-id>/caseroot_input.json`
+
+For directory jobs, the raw area contains staged files and manifest data for the full submission set.
+
+## What Is In summary.json
+
+The summary artifact contains:
+
+- parser and runtime information
+- total line and event counts
+- focused event counts
+- parse-status counts
+- level counts
+- gap statistics
+- top package groups
+- top exceptions
+- warnings
+
+The summary is optimized for human review and dashboard display.
+
+## What Is In caseroot_input.json
+
+The CaseRoot bundle is optimized for downstream correlation.
+
+It includes:
+
+- `jobId`
+- `location`
+- `primarySourceFile`
+- `evidenceKeys`
+- `rankedSections`
+- `expiresAt`
+- `summary`
+
+The embedded summary includes compact evidence such as:
+
+- package groups
+- representative sample messages
+- concise sample events
+- concise gap highlights
+- exception summaries
+
+The bundle intentionally avoids noisy full stack traces and repeated raw event text.
+
+## How This Helps CaseRoot
+
+This service prepares structured evidence so CaseRoot does not have to reason directly over raw log files.
+
+LogAnalyser helps CaseRoot by providing:
+
+- parser-selected runtime context
+- normalized package-level grouping
+- clustered repeated failures
+- compact exception summaries
+- timeline anomaly evidence
+- stable artifact references for deeper inspection
+
+In practice:
+
+1. LogAnalyser reads and normalizes the logs.
+2. LogAnalyser generates a compact CaseRoot bundle.
+3. CaseRoot maps package names, exceptions, and runtime hints to the codebase.
+4. CaseRoot builds a better LLM context for the final user response.
+
+## Large File Guidance
+
+The service accepts uploads up to `1 GB`, but the best choice depends on the use case.
+
+Use browser upload when:
+
+- the file is local to your machine
+- the size is reasonable for browser transfer
+- the user wants the simplest workflow
+
+Use `FILE_PATH` or `DIRECTORY` when:
+
+- the logs are already on the server
+- the logs are very large
+- this is a batch or operational workflow
+
+That avoids unnecessary HTTP upload overhead.
+
+## Retention Model
+
+Default retention:
+
+- raw logs: `15 days`
+- parsed artifacts: `30 days`
+- CaseRoot bundle: `30 days`
+- metadata / compact summaries: `90 days`
+
+Raw logs are not stored in the database by default.
+
+The intended model is:
+
+- raw evidence on filesystem/object-style storage
+- metadata in DB only when summary-store is enabled
 
 ## Optional Parquet Export
 
-Enable Parquet artifact generation when downstream analytics or batch comparison flows benefit from columnar output:
+Enable Parquet when downstream analytics or batch comparison needs columnar output:
 
 ```yaml
 loganalyser:
@@ -213,9 +438,9 @@ loganalyser:
     parquet-enabled: true
 ```
 
-## Optional Summary Store
+## Optional JDBC Summary Store
 
-Set the following properties to persist aggregate-only Phase 2 summary data into PostgreSQL-compatible tables:
+Enable aggregate persistence without storing raw logs in the database:
 
 ```yaml
 loganalyser:
@@ -229,4 +454,20 @@ loganalyser:
     initialize-schema: true
 ```
 
-This persists only summary rows, level counts, gap buckets, signature summaries, and exception summaries. Raw logs and parsed event artifacts remain on filesystem storage for retention-controlled access by CaseRoot.
+This stores compact aggregate data only:
+
+- job state
+- summary rows
+- level counts
+- gap buckets
+- signature summaries
+- exception summaries
+
+Raw logs and parsed event artifacts remain filesystem-backed.
+
+## Notes
+
+- parser profile selection is automatic for normal use
+- every log statement is preserved; the system is designed to be zero-drop
+- the UI is an operator console, but every main action is also available via API
+- the generated CaseRoot bundle becomes more useful when `application` and `environment` are filled in during job submission
